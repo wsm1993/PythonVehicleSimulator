@@ -184,9 +184,15 @@ class shipClarke83:
         delta_R = -delta  # physical rudder angle (rad)
         T = self.tau_X  # thrust (N)
         t_deduction = 0.1  # thrust deduction number
+        
+        # Adjust the sign of the rudder force and moment based on the direction of the relative surge velocity
+        sign = 1.0
+        if nu_r[0] < 0:  # If relative surge velocity is negative (moving backward)
+            sign = -1.0
+
         tau1 = (1 - t_deduction) * T - Xdd * math.sin(delta_R) ** 2
-        tau2 = -Yd * math.sin(2 * delta_R)
-        tau6 = -Nd * math.sin(2 * delta_R)
+        tau2 = sign * (-Yd * math.sin(2 * delta_R))  # Apply sign adjustment
+        tau6 = sign * (-Nd * math.sin(2 * delta_R))  # Apply sign adjustment
         tau = np.array([tau1, tau2, tau6], float)
 
         # Linear maneuvering model

@@ -55,6 +55,10 @@ class ShipSimulator:
         
         # Start simulation loop
         self.update_simulation()
+
+    def mps_to_knots(self, mps):
+        """Convert meters per second to knots"""
+        return mps * 1.94384
     
     def create_gui(self):
         # Create main frames
@@ -100,7 +104,7 @@ class ShipSimulator:
 
         # Surge force section
         ttk.Label(control_frame, text="Surge Force (N):").pack(anchor=tk.W, pady=(5, 0))
-        self.surge_slider = ttk.Scale(control_frame, from_=0, to=200000, 
+        self.surge_slider = ttk.Scale(control_frame, from_=-200000, to=200000, 
                                     orient=tk.HORIZONTAL,
                                     command=self.update_surge_force)
         self.surge_slider.pack(fill=tk.X, pady=(0, 10))
@@ -124,7 +128,7 @@ class ShipSimulator:
                                             orient=tk.HORIZONTAL,
                                             command=self.update_current_speed)
         self.current_speed_slider.pack(fill=tk.X)
-        self.current_speed_label = ttk.Label(control_frame, text=f"{self.current_speed:.1f} m/s")
+        self.current_speed_label = ttk.Label(control_frame, text="0.0 m/s (0.0 kt)")
         self.current_speed_label.pack(anchor=tk.W)
         self.current_speed_slider.set(self.current_speed)
 
@@ -181,7 +185,11 @@ class ShipSimulator:
     
     def update_current_speed(self, value):
         self.current_speed = float(value)
-        self.current_speed_label.config(text=f"{self.current_speed:.1f} m/s")
+        knots = self.mps_to_knots(self.current_speed)
+        self.current_speed_label.config(
+            text=f"{self.current_speed:.1f} m/s ({knots:.1f} kt)"
+        )
+    
     
     def update_current_direction(self, value):
         self.current_direction = float(value)
@@ -254,7 +262,8 @@ class ShipSimulator:
         
         # Speed (magnitude of surge and sway)
         speed = math.sqrt(self.nu[0]**2 + self.nu[1]**2)
-        self.speed_label.config(text=f"Speed: {speed:.1f} m/s")
+        knots = self.mps_to_knots(speed)
+        self.speed_label.config(text=f"Speed: {speed:.1f} m/s ({knots:.1f} kt)")
         
         # Rudder angle (convert to degrees)
         rudder_deg = math.degrees(self.ship.u_actual[0])
@@ -358,8 +367,9 @@ class ShipSimulator:
             current_arrow = Arrow(current_x, current_y, current_dx, current_dy, 
                                  width=1, fc='green', ec='green', alpha=0.7)
             self.ax.add_patch(current_arrow)
+            current_knots = self.mps_to_knots(self.current_speed)
             self.ax.text(current_x + current_dx/2, current_y + current_dy/2, 
-                        f"Current: {self.current_speed:.1f} m/s", 
+                        f"Current: {self.current_speed:.1f} m/s\n({current_knots:.1f} kt)", 
                         fontsize=9, color='green', alpha=0.7)
         
         # Draw velocity vector
