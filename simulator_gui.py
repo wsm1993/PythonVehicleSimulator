@@ -50,6 +50,9 @@ class ShipSimulator:
         self.rudder_angle = 0.0  # degrees
         self.surge_force = 100000  # Newtons
         
+        # Simulation speed
+        self.sim_speed = 1  # Simulation speed multiplier (1x to 100x)
+
         # Create GUI
         self.create_gui()
         
@@ -154,6 +157,14 @@ class ShipSimulator:
         
         self.reset_button = ttk.Button(sim_frame, text="Reset", command=self.reset_simulation)
         self.reset_button.pack(side=tk.LEFT, padx=5)
+
+        # Simulation speed control
+        ttk.Label(control_frame, text="Simulation Speed:").pack(anchor=tk.W, pady=(10, 0))
+        self.speed_slider = ttk.Scale(control_frame, from_=1, to=100, 
+                                    orient=tk.HORIZONTAL,
+                                    command=self.update_sim_speed)
+        self.speed_slider.pack(fill=tk.X, pady=(0, 5))
+ 
         
         # Status display
         status_frame = ttk.LabelFrame(control_frame, text="Ship Status", padding=10)
@@ -167,7 +178,10 @@ class ShipSimulator:
         
         self.speed_label = ttk.Label(status_frame, text="Speed: 0.0 m/s")
         self.speed_label.pack(anchor=tk.W)
-        
+
+        self.sim_speed_label = ttk.Label(control_frame, text=f"Sim Speed: {self.sim_speed}x")
+        self.sim_speed_label.pack(anchor=tk.W)
+
         self.rudder_status_label = ttk.Label(status_frame, text="Rudder: 0.0°")
         self.rudder_status_label.pack(anchor=tk.W)
         
@@ -195,6 +209,10 @@ class ShipSimulator:
         self.current_direction = float(value)
         self.current_dir_label.config(text=f"{self.current_direction:.1f}°")
     
+    def update_sim_speed(self, value):
+        self.sim_speed = max(1, min(100, float(value)))
+        self.sim_speed_label.config(text=f"Sim Speed: {self.sim_speed:.0f}x")
+
     def start_simulation(self):
         self.simulating = True
     
@@ -211,45 +229,51 @@ class ShipSimulator:
     
     def update_simulation(self):
         if self.simulating:
-            # Update time
-            self.time += self.sample_time
+            # Calculate effective time step based on speed multiplier
+            effective_sample_time = self.sample_time * self.sim_speed
+            steps = max(1, int(self.sim_speed))
+            step_time = effective_sample_time / steps
             
-            # Update current settings
-            self.ship.V_c = self.current_speed
-            self.ship.beta_c = math.radians(self.current_direction)
-            self.ship.tau_X = self.surge_force
-            
-            # Convert rudder angle to radians
-            rudder_rad = math.radians(self.rudder_angle)
-            u_control = np.array([rudder_rad], float)
-            
-            # Update ship dynamics
-            self.nu, self.ship.u_actual = self.ship.dynamics(
-                self.eta, self.nu, self.ship.u_actual, u_control, self.sample_time
-            )
-            
-            # Update position (using 3DOF kinematics)
-            psi = self.eta[5]
-            x_dot = math.cos(psi) * self.nu[0] - math.sin(psi) * self.nu[1]
-            y_dot = math.sin(psi) * self.nu[0] + math.cos(psi) * self.nu[1]
-            psi_dot = self.nu[5]
-            
-            self.eta[0] += x_dot * self.sample_time
-            self.eta[1] += y_dot * self.sample_time
-            self.eta[5] += psi_dot * self.sample_time
-            
-            # Record path
-            self.path.append((self.eta[0], self.eta[1]))
-            if len(self.path) > 500:  # Limit path length
-                self.path.pop(0)
-            
+            for _ in range(steps):
+                # Update time
+                self.time += step_time
+                
+                # Update current settings
+                self.ship.V_c = self.current_speed
+                self.ship.beta_c = math.radians(self.current_direction)
+                self.ship.tau_X = self.surge_force
+                
+                # Convert rudder angle to radians
+                rudder_rad = math.radians(self.rudder_angle)
+                u_control = np.array([rudder_rad], float)
+                
+                # Update ship dynamics
+                self.nu, self.ship.u_actual = self.ship.dynamics(
+                    self.eta, self.nu, self.ship.u_actual, u_control, step_time
+                )
+                
+                # Update position
+                psi = self.eta[5]
+                x_dot = math.cos(psi) * self.nu[0] - math.sin(psi) * self.nu[1]
+                y_dot = math.sin(psi) * self.nu[0] + math.cos(psi) * self.nu[1]
+                psi_dot = self.nu[5]
+                
+                self.eta[0] += x_dot * step_time
+                self.eta[1] += y_dot * step_time
+                self.eta[5] += psi_dot * step_time
+                
+                # Record path
+                self.path.append((self.eta[0], self.eta[1]))
+                if len(self.path) > 500:  # Limit path length
+                    self.path.pop(0)
+                
             # Update status display
             self.update_status()
         
         # Update plot
         self.update_plot()
         
-        # Schedule next update
+        # Schedule next update, after() expects milliseconds
         self.root.after(int(self.sample_time * 1000), self.update_simulation)
     
     def update_status(self):
