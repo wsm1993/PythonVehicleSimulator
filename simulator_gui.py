@@ -264,7 +264,7 @@ class ShipSimulator:
                 
                 # Record path
                 self.path.append((self.eta[0], self.eta[1]))
-                if len(self.path) > 500:  # Limit path length
+                if len(self.path) > 5000:  # Limit path length
                     self.path.pop(0)
                 
             # Update status display
