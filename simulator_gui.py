@@ -297,8 +297,8 @@ class ShipSimulator:
         # Clear previous drawings
         self.ax.clear()
         self.ax.set_title("Ship Motion")
-        self.ax.set_xlabel("East (m)")
-        self.ax.set_ylabel("North (m)")
+        self.ax.set_xlabel("North (m)")
+        self.ax.set_ylabel("East (m)")
         self.ax.grid(True)
         self.ax.set_aspect('equal')
         
