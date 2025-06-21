@@ -8,6 +8,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Arrow, Rectangle
 from matplotlib.transforms import Affine2D
 from python_vehicle_simulator.vehicles.shipClarke83 import shipClarke83  # Using the provided model
+from mpc_planner_old import MPCPlanner
 
 class ShipSimulator:
     def __init__(self, root):
@@ -49,6 +50,13 @@ class ShipSimulator:
         # Control settings
         self.rudder_angle = 0.0  # degrees
         self.surge_force = 100000  # Newtons
+
+        # MPC controller
+        self.mpc_planner = MPCPlanner(dt=0.2, horizon=30)
+        self.mpc_target = None
+        self.mpc_active = False
+        self.mpc_update_interval = 1.0  # seconds
+        self.last_mpc_update = 0
         
         # Simulation speed
         self.sim_speed = 1  # Simulation speed multiplier (1x to 100x)
@@ -184,6 +192,43 @@ class ShipSimulator:
 
         self.rudder_status_label = ttk.Label(status_frame, text="Rudder: 0.0°")
         self.rudder_status_label.pack(anchor=tk.W)
+
+        # Add MPC controls
+        mpc_frame = ttk.LabelFrame(control_frame, text="MPC Controller", padding=10)
+        mpc_frame.pack(fill=tk.X, pady=10)
+        
+        # Target position
+        ttk.Label(mpc_frame, text="Target X:").pack(anchor=tk.W)
+        self.target_x_entry = ttk.Entry(mpc_frame)
+        self.target_x_entry.pack(fill=tk.X)
+        
+        ttk.Label(mpc_frame, text="Target Y:").pack(anchor=tk.W)
+        self.target_y_entry = ttk.Entry(mpc_frame)
+        self.target_y_entry.pack(fill=tk.X)
+        
+        ttk.Label(mpc_frame, text="Target Heading (deg):").pack(anchor=tk.W)
+        self.target_heading_entry = ttk.Entry(mpc_frame)
+        self.target_heading_entry.pack(fill=tk.X)
+        
+        # MPC buttons
+        btn_frame = ttk.Frame(mpc_frame)
+        btn_frame.pack(fill=tk.X, pady=5)
+        
+        self.set_target_btn = ttk.Button(
+            btn_frame, text="Set Target", command=self.set_mpc_target)
+        self.set_target_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.start_mpc_btn = ttk.Button(
+            btn_frame, text="Start MPC", command=self.start_mpc)
+        self.start_mpc_btn.pack(side=tk.LEFT, padx=2)
+        
+        self.stop_mpc_btn = ttk.Button(
+            btn_frame, text="Stop MPC", command=self.stop_mpc)
+        self.stop_mpc_btn.pack(side=tk.LEFT, padx=2)
+        
+        # MPC status
+        self.mpc_status = ttk.Label(mpc_frame, text="MPC: Inactive")
+        self.mpc_status.pack(anchor=tk.W)
         
         # Set initial plot limits
         self.ax.set_xlim(-100, 100)
@@ -233,6 +278,30 @@ class ShipSimulator:
             effective_sample_time = self.sample_time * self.sim_speed
             steps = max(1, int(self.sim_speed))
             step_time = effective_sample_time / steps
+
+            # MPC control logic
+            if self.mpc_active and (self.time - self.last_mpc_update >= self.mpc_update_interval):
+                self.last_mpc_update = self.time
+                
+                # Get current state
+                position = (self.eta[0], self.eta[1])
+                heading_deg = math.degrees(self.eta[5]) % 360
+                
+                # Compute MPC commands
+                v_command, psi_dot_command = self.mpc_planner.update(
+                    position, heading_deg)
+                
+                # Convert to ship controls
+                # (Simple proportional controllers - can be improved)
+                surge_error = v_command - self.nu[0]
+                self.surge_force = 100000 * max(0, min(1, surge_error))
+                
+                # Convert turn rate to rudder angle
+                self.rudder_angle = psi_dot_command * 2.0  # scaling factor
+                
+                # Update sliders
+                self.rudder_slider.set(self.rudder_angle)
+                self.surge_slider.set(self.surge_force)
             
             for _ in range(steps):
                 # Update time
@@ -409,6 +478,38 @@ class ShipSimulator:
         
         # Redraw canvas
         self.canvas.draw()
+
+    def set_mpc_target(self):
+        try:
+            x = float(self.target_x_entry.get())
+            y = float(self.target_y_entry.get())
+            heading = self.target_heading_entry.get()
+            
+            self.mpc_target = (x, y)
+            self.mpc_planner.set_target((x, y), float(heading) if heading else None)
+            
+            # Draw target on plot
+            self.ax.plot(x, y, 'ro', markersize=8)
+            if heading:
+                self.ax.text(x, y, f"Target\n{heading}°", 
+                            ha='center', va='bottom', color='red')
+            self.canvas.draw()
+            
+            self.mpc_status.config(text="MPC: Target Set")
+        except ValueError:
+            self.mpc_status.config(text="MPC: Invalid Target")
+
+    def start_mpc(self):
+        if self.mpc_target:
+            self.mpc_active = True
+            self.mpc_status.config(text="MPC: Active")
+        else:
+            self.mpc_status.config(text="MPC: Set Target First")
+
+    def stop_mpc(self):
+        self.mpc_active = False
+        self.mpc_status.config(text="MPC: Stopped")
+
 
 # Create and run the application
 if __name__ == "__main__":
