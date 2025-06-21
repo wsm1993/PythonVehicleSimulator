@@ -8,7 +8,7 @@ from matplotlib.figure import Figure
 from matplotlib.patches import Polygon, Arrow, Rectangle
 from matplotlib.transforms import Affine2D
 from python_vehicle_simulator.vehicles.shipClarke83 import shipClarke83  # Using the provided model
-from mpc_planner_old import MPCPlanner
+from mpc_planner import MPCPlanner
 
 class ShipSimulator:
     def __init__(self, root):

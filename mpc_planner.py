@@ -99,8 +99,8 @@ class MPCPlanner:
         
         for i in range(self.horizon):
             psi_rad = np.radians(psi_sim)
-            x_sim += v * np.sin(psi_rad) * self.dt
-            y_sim += v * np.cos(psi_rad) * self.dt
+            x_sim += v * np.cos(psi_rad) * self.dt
+            y_sim += v * np.sin(psi_rad) * self.dt
             psi_sim = (psi_sim + psi_dot * self.dt) % 360
             path.append((x_sim, y_sim))
             
