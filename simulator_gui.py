@@ -333,7 +333,7 @@ class ShipSimulator:
                 
                 # Record path
                 self.path.append((self.eta[0], self.eta[1]))
-                if len(self.path) > 500:  # Limit path length
+                if len(self.path) > 5000:  # Limit path length
                     self.path.pop(0)
                 
             # Update status display
@@ -366,8 +366,8 @@ class ShipSimulator:
         # Clear previous drawings
         self.ax.clear()
         self.ax.set_title("Ship Motion")
-        self.ax.set_xlabel("East (m)")
-        self.ax.set_ylabel("North (m)")
+        self.ax.set_xlabel("North (m)")
+        self.ax.set_ylabel("East (m)")
         self.ax.grid(True)
         self.ax.set_aspect('equal')
         
