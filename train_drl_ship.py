@@ -6,7 +6,7 @@ from ship_env import ShipClarke83Env  # Use the updated environment
 
 def train_agent():
     # Create environment
-    env = ShipClarke83Env()
+    env = ShipClarke83Env(render_mode="human")
     check_env(env)  # Validate environment
     
     # Initialize PPO agent
@@ -18,7 +18,7 @@ def train_agent():
     )
     
     # Train the agent
-    model.learn(total_timesteps=1000000)
+    model.learn(total_timesteps=100000, progress_bar=True)    
     
     # Save the model
     model.save("ppo_ship_control")
