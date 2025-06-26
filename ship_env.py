@@ -3,8 +3,8 @@ import math
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
-import pygame
-from python_vehicle_simulator.vehicles.shipClarke83 import shipClarke83  # Using the provided model
+from python_vehicle_simulator.vehicles.shipClarke83 import shipClarke83
+from ship_renderer import ShipRenderer  # <-- NEW IMPORT
 
 class ShipClarke83Env(gym.Env):
     def __init__(self, render_mode=None):
@@ -44,10 +44,9 @@ class ShipClarke83Env(gym.Env):
         self.observation_space = spaces.Box(
             low=-np.inf, 
             high=np.inf, 
-            shape=(6,), 
+            shape=(9,),  # Changed from (6,) to (9,)
             dtype=np.float32 
         )
-        
         # Control limits
         self.max_tau_X = 1e4  # Max surge force (N)
         self.max_delta = np.deg2rad(30)  # Max rudder angle (rad)
@@ -70,30 +69,58 @@ class ShipClarke83Env(gym.Env):
         self.target = np.array([30, 30, np.deg2rad(45), 5.0])
         
         # Normalization scales
-        self.norm_scale = np.array([200, 200, 2*np.pi, 10, 5, np.pi/6])  # More realistic
-        
+        self.norm_scale = np.array([200, 200, 2*np.pi, 10, 5, np.pi/6, 200, 200, 2*np.pi])  # More realistic
+
+        # Previous position error for reward calculation
+        self.prev_pos_error = None
+
         # Episode parameters
         self.max_steps = 1000
         self.step_count = 0
         
+        # Current control values
+        self.current_thrust = 0
+        self.current_rudder = 0
+        self.current_action = -1
+        
         # PyGame rendering setup
         self.render_mode = render_mode
+
+        # PyGame rendering setup
         self.screen = None
         self.clock = None
         self.screen_width = 800
         self.screen_height = 800
         self.scale = 2.0  # Pixels per meter
-        
+
         # Colors
         self.water_color = (135, 206, 235)  # Sky blue
         self.ship_color = (70, 130, 180)    # Steel blue
-        self.target_color = (220, 20, 60)    # Crimson red
-        self.trail_color = (30, 144, 255)    # Dodger blue
-        self.text_color = (25, 25, 25)       # Dark gray
-        
+        self.target_color = (220, 20, 60)   # Crimson red
+        self.trail_color = (30, 144, 255)   # Dodger blue
+        self.text_color = (25, 25, 25)      # Dark gray
+        self.gauge_color = (50, 50, 50)     # Dark gray for gauges
+        self.thrust_color = (0, 128, 0)     # Green for thrust
+        self.rudder_color = (128, 0, 0)     # Red for rudder
+
         # Trail for ship path
         self.trail = []
         self.max_trail_length = 200
+
+        # Renderer instance
+        self.renderer = ShipRenderer(
+            screen_width=self.screen_width,
+            screen_height=self.screen_height,
+            scale=self.scale,
+            water_color=self.water_color,
+            ship_color=self.ship_color,
+            target_color=self.target_color,
+            trail_color=self.trail_color,
+            text_color=self.text_color,
+            gauge_color=self.gauge_color,
+            thrust_color=self.thrust_color,
+            rudder_color=self.rudder_color
+        ) if render_mode == "human" else None
 
     def reset(self, seed=None, options=None):
         # Reset ship state
@@ -103,22 +130,42 @@ class ShipClarke83Env(gym.Env):
         self.ship.tau_X = 0
         self.step_count = 0
         self.trail = []  # Clear trail
+
+        # Reset control values
+        self.current_thrust = 0
+        self.current_rudder = 0
+        self.current_action = -1
         
         # Reset rendering if needed
-        if self.render_mode == "human":
-            self._render_init()
-            
-        return self._get_obs(), {}  # Return obs and empty info dict
+        if self.render_mode == "human" and self.renderer is not None:
+            self.renderer.reset()
+        x, y = self.eta[0], self.eta[1]
+        x_target, y_target = self.target[0], self.target[1]
+        self.prev_pos_error = np.sqrt((x - x_target)**2 + (y - y_target)**2)
+        return self._get_obs(), {}
 
     def _get_obs(self):
         state = np.array([
             self.eta[0], self.eta[1], self.eta[5],
             self.ship.nu[0], self.ship.nu[1], self.ship.nu[5]
         ])
-        normalized = state / self.norm_scale
-        return normalized.astype(np.float32) 
+    
+        # ADD RELATIVE TARGET INFORMATION
+        dx = self.target[0] - self.eta[0]
+        dy = self.target[1] - self.eta[1]
+        dpsi = self.target[2] - self.eta[5]
+        
+        # Normalize and add to observation
+        relative_state = np.array([dx, dy, dpsi])
+        
+        full_obs = np.concatenate([state, relative_state])
+        normalized = full_obs / self.norm_scale
+        return normalized.astype(np.float32)
 
     def step(self, action):
+        # Store current action
+        self.current_action = action
+        
         # Map discrete action to thrust and rudder commands
         thrust_level = ['low', 'med', 'high'][action // 3]
         rudder_dir = ['left', 'center', 'right'][action % 3]
@@ -130,6 +177,10 @@ class ShipClarke83Env(gym.Env):
         # Scale to actual values
         tau_X = thrust_cont * self.max_tau_X
         delta_c = rudder_cont * self.max_delta
+
+        # Store control values for rendering
+        self.current_thrust = tau_X
+        self.current_rudder = delta_c
 
         # Update ship's surge force
         self.ship.tau_X = tau_X
@@ -167,8 +218,6 @@ class ShipClarke83Env(gym.Env):
         # Calculate reward
         reward, terminated = self._calculate_reward(obs, action)
         truncated = self.step_count >= self.max_steps
-        if truncated:
-            reward -= 50  # Penalty for truncation
 
         # Increment step count
         self.step_count += 1
@@ -181,219 +230,89 @@ class ShipClarke83Env(gym.Env):
 
     def _calculate_reward(self, obs, action):
         state = obs * self.norm_scale
-        x, y, psi, u, v, r = state
+        x, y, psi, u, v, r, dx, dy, dpsi = state
         x_target, y_target, psi_target, u_target = self.target
         
-        # Position reward (inverse distance)
-        pos_error = np.sqrt((x - x_target)**2 + (y - y_target)**2)
-        position_reward = 1.0 / (1.0 + pos_error)  # [0, 1] range
+        # Calculate position error
+        current_pos_error = np.sqrt((x - x_target)**2 + (y - y_target)**2)
         
-        # Heading reward
+        # Progressive reward for distance reduction
+        if hasattr(self, 'prev_pos_error'):
+            distance_reduction = self.prev_pos_error - current_pos_error
+        else:
+            # First step - no previous error
+            distance_reduction = 0
+        self.prev_pos_error = current_pos_error  # Store for next step
+        
+        # Position reward (exponential decay)
+        position_reward = np.exp(-0.05 * current_pos_error)  # Better gradient
+        
+        # Heading reward (linear decay)
         psi_error = min(abs(psi - psi_target), 2*np.pi - abs(psi - psi_target))
-        heading_reward = np.cos(psi_error)  # [-1, 1] range
+        heading_reward = 1 - min(psi_error / np.pi, 1)  # Range [0,1]
         
-        # Speed reward
+        # Speed reward (Gaussian)
         speed_error = abs(u - u_target)
-        speed_reward = 1.0 / (1.0 + speed_error)
+        speed_reward = np.exp(-0.5 * (speed_error**2))
         
-        # Action penalties (gentler)
-        # Since actions are discrete, we can add small penalty for using rudder
-        rudder_penalty = 0.001 if action % 3 != 1 else 0  # Penalize non-center rudder
+        # Action penalties (more significant)
+        rudder_penalty = 0.1 if action % 3 != 1 else 0  # Penalize non-center rudder
         
         # Composite reward (weighted components)
         reward = (
             2.0 * position_reward +
-            1.0 * heading_reward +
-            0.5 * speed_reward -
+            0.2 * heading_reward +
+            1.0 * speed_reward +
+            1.0 * distance_reduction -  # Reward for moving closer
             rudder_penalty
         )
         
+        boundary_size = 60
         # Check if ship is out of bounds
         out_of_bounds = (
-            x < -200 or 
-            x > 200 or 
-            y < -200 or 
-            y > 200
+            x < -boundary_size or 
+            x > boundary_size or 
+            y < -boundary_size or 
+            y > boundary_size
         )
         
-        # Success conditions (more achievable)
+        # Success conditions (tighter)
         success = (
-            pos_error < 20 and  # 20m position tolerance
-            psi_error < np.deg2rad(15) and  # 15° heading tolerance
-            speed_error < 1.0  # 1m/s speed tolerance
+            current_pos_error < 5 and            # 5m position tolerance
+            psi_error < np.deg2rad(10) and       # 10° heading tolerance
+            speed_error < 0.5                    # 0.5m/s speed tolerance
         )
         
         # Terminate if out of bounds or success condition met
         terminated = out_of_bounds or success
         
+        # Terminal rewards
         if success:
-            reward += 50  # Success bonus
+            reward += 100  # Success bonus
         elif out_of_bounds:
-            # Apply penalty for going out of bounds
-            reward -= 50
+            reward -= 100  # Failure penalty
             
         return reward, bool(terminated)
     
-    def _render_init(self):
-        """Initialize PyGame rendering"""
-        pygame.init()
-        self.screen = pygame.display.set_mode((self.screen_width, self.screen_height))
-        pygame.display.set_caption("Ship Navigation Environment")
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont(None, 24)
-    
     def render(self):
-        """Render the environment using PyGame"""
-        if self.screen is None and self.render_mode == "human":
-            self._render_init()
-        
-        # Clear screen
-        self.screen.fill(self.water_color)
-        
-        # Calculate center offset - world coordinates origin at screen center
-        center_x = self.screen_width // 2
-        center_y = self.screen_height // 2
-        
-        # Draw grid
-        self._draw_grid(center_x, center_y)
-        
-        # Draw ship trail
-        if len(self.trail) > 1:
-            pygame.draw.lines(
-                self.screen, 
-                self.trail_color, 
-                False, 
-                [(center_x + x * self.scale, center_y - y * self.scale) for x, y in self.trail],
-                2
+        """Render the environment using ShipRenderer"""
+        if self.render_mode == "human" and self.renderer is not None:
+            self.renderer.render(
+                eta=self.eta,
+                nu=self.ship.nu,
+                trail=self.trail,
+                target=self.target,
+                step_count=self.step_count,
+                max_steps=self.max_steps,
+                current_action=self.current_action,
+                current_thrust=self.current_thrust,
+                current_rudder=self.current_rudder,
+                max_tau_X=self.max_tau_X,
+                max_delta=self.max_delta
             )
-        
-        # Draw target
-        target_x = center_x + self.target[0] * self.scale
-        target_y = center_y - self.target[1] * self.scale
-        pygame.draw.circle(self.screen, self.target_color, (int(target_x), int(target_y)), 10)
-        
-        # Draw target heading indicator
-        target_heading = self.target[2]
-        end_x = target_x + 20 * np.cos(target_heading)
-        end_y = target_y - 20 * np.sin(target_heading)
-        pygame.draw.line(
-            self.screen, 
-            (0, 0, 0), 
-            (target_x, target_y), 
-            (end_x, end_y), 
-            3
-        )
-        
-        # Draw ship
-        ship_x = center_x + self.eta[0] * self.scale
-        ship_y = center_y - self.eta[1] * self.scale
-        heading = self.eta[5]  # Heading in radians
-        
-        # Create ship polygon (triangle)
-        ship_points = []
-        for i in range(3):
-            angle = heading + i * 2 * np.pi / 3  # Points at 120° intervals
-            px = ship_x + 15 * np.cos(angle)
-            py = ship_y - 15 * np.sin(angle)
-            ship_points.append((px, py))
-        
-        pygame.draw.polygon(self.screen, self.ship_color, ship_points)
-        
-        # Draw heading indicator
-        end_x = ship_x + 30 * np.cos(heading)
-        end_y = ship_y - 30 * np.sin(heading)
-        pygame.draw.line(
-            self.screen, 
-            (0, 0, 0), 
-            (ship_x, ship_y), 
-            (end_x, end_y), 
-            3
-        )
-        
-        # Draw info panel
-        self._draw_info_panel()
-        
-        # Update display
-        pygame.display.flip()
-        
-        # Maintain frame rate
-        self.clock.tick(60)
-    
-    def _draw_grid(self, center_x, center_y):
-        """Draw a grid for better spatial reference"""
-        # Draw major grid lines every 50 meters
-        grid_size = 50 * self.scale
-        
-        # Vertical lines
-        for x in range(-200, 201, 50):
-            screen_x = center_x + x * self.scale
-            if 0 <= screen_x <= self.screen_width:
-                pygame.draw.line(
-                    self.screen, 
-                    (200, 200, 200), 
-                    (screen_x, 0), 
-                    (screen_x, self.screen_height), 
-                    1
-                )
-        
-        # Horizontal lines
-        for y in range(-200, 201, 50):
-            screen_y = center_y - y * self.scale
-            if 0 <= screen_y <= self.screen_height:
-                pygame.draw.line(
-                    self.screen, 
-                    (200, 200, 200), 
-                    (0, screen_y), 
-                    (self.screen_width, screen_y), 
-                    1
-                )
-        
-        # Draw axes
-        pygame.draw.line(
-            self.screen, 
-            (100, 100, 100), 
-            (center_x, 0), 
-            (center_x, self.screen_height), 
-            2
-        )
-        pygame.draw.line(
-            self.screen, 
-            (100, 100, 100), 
-            (0, center_y), 
-            (self.screen_width, center_y), 
-            2
-        )
-        
-        # Draw origin marker
-        pygame.draw.circle(self.screen, (0, 0, 0), (center_x, center_y), 5)
-    
-    def _draw_info_panel(self):
-        """Draw information panel at top of screen"""
-        # Create info strings
-        position = f"Position: ({self.eta[0]:.1f}, {self.eta[1]:.1f}) m"
-        heading = f"Heading: {np.rad2deg(self.eta[5]):.1f}°"
-        speed = f"Speed: {self.ship.nu[0]:.1f} m/s"
-        steps = f"Step: {self.step_count}/{self.max_steps}"
-        
-        # Render text
-        texts = [
-            self.font.render(position, True, self.text_color),
-            self.font.render(heading, True, self.text_color),
-            self.font.render(speed, True, self.text_color),
-            self.font.render(steps, True, self.text_color)
-        ]
-        
-        # Draw text panel
-        pygame.draw.rect(self.screen, (240, 240, 240), (10, 10, 300, 120))
-        
-        # Blit texts
-        for i, text in enumerate(texts):
-            self.screen.blit(text, (20, 20 + i * 24))
-    
+
     def close(self):
         """Close the rendering window"""
-        if self.screen is not None:
-            pygame.display.quit()
-            pygame.quit()
-            self.screen = None
-            self.clock = None
+        if self.renderer is not None:
+            self.renderer.close()
+            self.renderer = None
