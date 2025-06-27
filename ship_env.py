@@ -62,6 +62,9 @@ class ShipEnv(gym.Env):
         self.screen = None
 
     def reset(self, seed=None, options=None):
+        # Set random seed if provided
+        super().reset(seed=seed)
+        
         # Reset ship to initial state
         self.ship = shipClarke83(controlSystem='stepInput', L=50.0, B=7.0, T=5.0, Cb=0.7)
         
@@ -69,6 +72,9 @@ class ShipEnv(gym.Env):
         self.eta = np.array([0, 0, 0, 0, 0, 0], dtype=float)  # position/orientation
         self.nu = np.array([2.0, 0, 0, 0, 0, 0], dtype=float)  # velocities
         self.u_actual = np.array([0.0], dtype=float)  # rudder state
+        
+        # Generate new random targets in 10-100m radius around (0,0)
+        self._generate_random_targets()
         
         # Reset environment state
         self.current_target_idx = 0
@@ -89,11 +95,27 @@ class ShipEnv(gym.Env):
         # Return initial observation
         return self._get_obs(), {}
 
+    def _generate_random_targets(self):
+        """Generate 5 random targets within 10-100m radius of origin"""
+        # Create a random number generator
+        rng = np.random.default_rng()
+        
+        # Generate random angles and radii
+        angles = rng.uniform(0, 2 * np.pi, size=5)
+        radii = rng.uniform(10, 100, size=5)
+        
+        # Convert polar to Cartesian coordinates
+        x = radii * np.cos(angles)
+        y = radii * np.sin(angles)
+        
+        # Create targets array
+        self.targets = np.column_stack((x, y))
+
     def _get_obs(self):
         """Compute current observation vector"""
         target_idx = min(self.current_target_idx, len(self.targets) - 1)
         target_pos = self.targets[target_idx]
-        
+
         # Calculate relative position to current target in body frame
         target_pos = self.targets[self.current_target_idx]
         dx = target_pos[0] - self.eta[0]
