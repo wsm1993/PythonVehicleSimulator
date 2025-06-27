@@ -33,8 +33,8 @@ class ShipRenderer:
         self.font = pygame.font.SysFont(None, 24)
         self.small_font = pygame.font.SysFont(None, 20)
 
-    def render(self, eta, nu, trail, target, step_count, max_steps,
-               current_action, current_thrust, current_rudder, max_tau_X, max_delta):
+    def render(self, eta, nu, trail, targets, current_target, step_count, max_steps,
+               current_thrust, current_rudder, max_tau_X, max_delta):
         if self.screen is None:
             self._render_init()
 
@@ -58,22 +58,28 @@ class ShipRenderer:
                 2
             )
 
-        # Draw target
-        target_x = center_x + target[0] * self.scale
-        target_y = center_y - target[1] * self.scale
-        pygame.draw.circle(self.screen, self.target_color, (int(target_x), int(target_y)), 10)
-
-        # Draw target heading indicator
-        target_heading = target[2]
-        end_x = target_x + 20 * np.cos(target_heading)
-        end_y = target_y - 20 * np.sin(target_heading)
-        pygame.draw.line(
-            self.screen,
-            (0, 0, 0),
-            (target_x, target_y),
-            (end_x, end_y),
-            3
-        )
+        # Draw all targets
+        for i, target in enumerate(targets):
+            target_x = center_x + target[0] * self.scale
+            target_y = center_y - target[1] * self.scale
+            
+            # Highlight current target
+            if np.array_equal(target, current_target):
+                color = (255, 0, 0)  # red for current target
+                radius = 12
+                # Draw target number
+                target_text = self.small_font.render(f"T{i+1}", True, (255, 255, 255))
+                self.screen.blit(target_text, (target_x - 8, target_y - 8))
+            else:
+                color = (200, 200, 200)  # gray for other targets
+                radius = 8
+            
+            pygame.draw.circle(self.screen, color, (int(target_x), int(target_y)), radius)
+            
+            # Draw target number for all targets
+            if not np.array_equal(target, current_target):
+                target_text = self.small_font.render(f"T{i+1}", True, (0, 0, 0))
+                self.screen.blit(target_text, (target_x - 8, target_y - 8))
 
         # Draw ship
         ship_x = center_x + eta[0] * self.scale
@@ -103,8 +109,8 @@ class ShipRenderer:
 
         # Draw info panel
         self._draw_info_panel(
-            eta, nu, step_count, max_steps,
-            current_action, current_thrust, current_rudder, max_tau_X, max_delta
+            eta, nu, targets, current_target, step_count, max_steps,
+            current_thrust, current_rudder, max_tau_X, max_delta
         )
 
         # Draw control gauges
@@ -154,17 +160,24 @@ class ShipRenderer:
         )
         pygame.draw.circle(self.screen, (0, 0, 0), (center_x, center_y), 5)
 
-    def _draw_info_panel(self, eta, nu, step_count, max_steps,
-                        current_action, current_thrust, current_rudder, max_tau_X, max_delta):
-        status = "Status: " + ("SUCCESS" if step_count < max_steps else "RUNNING")
+    def _draw_info_panel(self, eta, nu, targets, current_target, step_count, max_steps,
+                        current_thrust, current_rudder, max_tau_X, max_delta):
+        # Status based on target completion
+        status = "Status: RUNNING"
+        if step_count >= max_steps:
+            status = "Status: TIMEOUT"
+        elif np.array_equal(targets[-1], current_target):
+            status = "Status: SUCCESS"
+        
         position = f"Position: ({eta[0]:.1f}, {eta[1]:.1f}) m"
         heading = f"Heading: {np.rad2deg(eta[5]):.1f}°"
         speed = f"Speed: {nu[0]:.1f} m/s"
         steps = f"Step: {step_count}/{max_steps}"
+        
+        # Find current target index
+        current_idx = np.where((targets == current_target).all(axis=1))[0][0] + 1
+        targets_info = f"Target: {current_idx}/{len(targets)}"
 
-        thrust_level = ['low', 'med', 'high'][current_action // 3] if current_action >= 0 else "N/A"
-        rudder_dir = ['left', 'center', 'right'][current_action % 3] if current_action >= 0 else "N/A"
-        action_info = f"Action: {current_action} ({thrust_level} thrust, {rudder_dir} rudder)"
         thrust_info = f"Surge Force: {current_thrust:.1f} N"
         rudder_info = f"Rudder Angle: {np.rad2deg(current_rudder):.1f}°"
 
@@ -174,12 +187,12 @@ class ShipRenderer:
             self.font.render(heading, True, self.text_color),
             self.font.render(speed, True, self.text_color),
             self.font.render(steps, True, self.text_color),
-            self.font.render(action_info, True, self.text_color),
+            self.font.render(targets_info, True, self.text_color),
             self.font.render(thrust_info, True, self.text_color),
             self.font.render(rudder_info, True, self.text_color)
         ]
 
-        pygame.draw.rect(self.screen, (240, 240, 240), (10, 10, 400, 180))
+        pygame.draw.rect(self.screen, (240, 240, 240), (10, 10, 400, 200))
         for i, text in enumerate(texts):
             self.screen.blit(text, (20, 20 + i * 24))
 
@@ -195,8 +208,15 @@ class ShipRenderer:
 
         thrust_percent = abs(current_thrust) / max_tau_X
         thrust_fill_width = int(thrust_percent * gauge_width)
-        pygame.draw.rect(self.screen, self.thrust_color,
-                         (thrust_x, thrust_y, thrust_fill_width, gauge_height))
+        
+        # Draw fill from center for thrust
+        center_x = thrust_x + gauge_width // 2
+        if current_thrust >= 0:
+            pygame.draw.rect(self.screen, self.thrust_color,
+                             (center_x, thrust_y, thrust_fill_width // 2, gauge_height))
+        else:
+            pygame.draw.rect(self.screen, self.thrust_color,
+                             (center_x - thrust_fill_width // 2, thrust_y, thrust_fill_width // 2, gauge_height))
 
         thrust_label = self.small_font.render("Thrust", True, self.text_color)
         self.screen.blit(thrust_label, (thrust_x, thrust_y - 20))
