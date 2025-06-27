@@ -4,6 +4,7 @@ import gymnasium as gym
 from gymnasium import spaces
 from python_vehicle_simulator.vehicles.shipClarke83 import shipClarke83
 from ship_renderer import ShipRenderer
+import pygame
 
 class ShipEnv(gym.Env):
     metadata = {'render.modes': ['human', 'rgb_array'], 'render_fps': 30}
