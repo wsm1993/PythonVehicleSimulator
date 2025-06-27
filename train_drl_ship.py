@@ -6,8 +6,8 @@ from ship_env import ShipClarke83Env  # Use the updated environment
 
 def train_agent():
     # Create environment
-    # env = ShipClarke83Env(render_mode="human")  
-    env = ShipClarke83Env()  # No rendering for training
+    env = ShipClarke83Env(render_mode="human")  
+    #env = ShipClarke83Env()  # No rendering for training
     check_env(env)  # Validate environment
     
     # Initialize PPO agent

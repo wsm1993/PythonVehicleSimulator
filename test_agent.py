@@ -23,12 +23,12 @@ def test_agent():
         x, y = zip(*positions[-1])
         plt.plot(x, y, label=f"Episode {episode+1}")
 
-    plt.plot(env.target[0], env.target[1], 'ro', markersize=10)
-    plt.xlabel('X Position (m)')
-    plt.ylabel('Y Position (m)')
-    plt.title('Ship Trajectories')
-    plt.legend()
-    plt.show()    
+        plt.plot(env.target[0], env.target[1], 'ro', markersize=10)
+        plt.xlabel('X Position (m)')
+        plt.ylabel('Y Position (m)')
+        plt.title('Ship Trajectories')
+        plt.legend()
+        plt.show()    
 
     # # Run 5 episodes
     # for episode in range(5):

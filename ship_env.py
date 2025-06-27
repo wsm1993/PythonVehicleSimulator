@@ -65,8 +65,9 @@ class ShipClarke83Env(gym.Env):
             'right': 1.0   # Full right
         }
         
-        # Target state: [x_target, y_target, ψ_target, u_target]
-        self.target = np.array([30, 30, np.deg2rad(45), 5.0])
+        # Initialize targets (will be set in reset)
+        self.targets = []  # List to store 5 targets
+        self.current_target_index = 0  # Index of current target
         
         # Normalization scales
         self.norm_scale = np.array([200, 200, 2*np.pi, 10, 5, np.pi/6, 200, 200, 2*np.pi])  # More realistic
@@ -75,7 +76,7 @@ class ShipClarke83Env(gym.Env):
         self.prev_pos_error = None
 
         # Episode parameters
-        self.max_steps = 1000
+        self.max_steps = 2000
         self.step_count = 0
         
         # Current control values
@@ -130,30 +131,49 @@ class ShipClarke83Env(gym.Env):
         self.ship.tau_X = 0
         self.step_count = 0
         self.trail = []  # Clear trail
+        self.current_target_index = 0  # Reset to first target
 
         # Reset control values
         self.current_thrust = 0
         self.current_rudder = 0
         self.current_action = -1
         
+        # Generate 5 random targets
+        self.targets = []
+        for _ in range(5):
+            r = np.random.uniform(30, 100)  # Random distance (30-50m)
+            theta = np.random.uniform(0, 2*np.pi)  # Random angle
+            x_target = r * np.cos(theta)
+            y_target = r * np.sin(theta)
+            psi_target = np.random.uniform(-np.pi, np.pi)  # Random heading
+            u_target = np.random.uniform(3.0, 8.0)  # Random target speed (3-8 m/s)
+            self.targets.append(np.array([x_target, y_target, psi_target, u_target]))
+        
+        # Get current target
+        current_target = self.targets[0]
+        x, y = self.eta[0], self.eta[1]
+        x_target, y_target = current_target[0], current_target[1]
+        self.prev_pos_error = np.sqrt((x - x_target)**2 + (y - y_target)**2)
+        
         # Reset rendering if needed
         if self.render_mode == "human" and self.renderer is not None:
             self.renderer.reset()
-        x, y = self.eta[0], self.eta[1]
-        x_target, y_target = self.target[0], self.target[1]
-        self.prev_pos_error = np.sqrt((x - x_target)**2 + (y - y_target)**2)
+            
         return self._get_obs(), {}
 
     def _get_obs(self):
+        # Get current target
+        current_target = self.targets[self.current_target_index]
+        
         state = np.array([
             self.eta[0], self.eta[1], self.eta[5],
             self.ship.nu[0], self.ship.nu[1], self.ship.nu[5]
         ])
     
         # ADD RELATIVE TARGET INFORMATION
-        dx = self.target[0] - self.eta[0]
-        dy = self.target[1] - self.eta[1]
-        dpsi = self.target[2] - self.eta[5]
+        dx = current_target[0] - self.eta[0]
+        dy = current_target[1] - self.eta[1]
+        dpsi = current_target[2] - self.eta[5]
         
         # Normalize and add to observation
         relative_state = np.array([dx, dy, dpsi])
@@ -229,9 +249,11 @@ class ShipClarke83Env(gym.Env):
         return obs, reward, terminated, truncated, {}
 
     def _calculate_reward(self, obs, action):
+        terminated = False
         state = obs * self.norm_scale
         x, y, psi, u, v, r, dx, dy, dpsi = state
-        x_target, y_target, psi_target, u_target = self.target
+        current_target = self.targets[self.current_target_index]
+        x_target, y_target, psi_target, u_target = current_target
         
         # Calculate position error
         current_pos_error = np.sqrt((x - x_target)**2 + (y - y_target)**2)
@@ -242,8 +264,7 @@ class ShipClarke83Env(gym.Env):
         else:
             # First step - no previous error
             distance_reduction = 0
-        self.prev_pos_error = current_pos_error  # Store for next step
-        
+            
         # Position reward (exponential decay)
         position_reward = np.exp(-0.05 * current_pos_error)  # Better gradient
         
@@ -255,19 +276,7 @@ class ShipClarke83Env(gym.Env):
         speed_error = abs(u - u_target)
         speed_reward = np.exp(-0.5 * (speed_error**2))
         
-        # Action penalties (more significant)
-        rudder_penalty = 0.1 if action % 3 != 1 else 0  # Penalize non-center rudder
-        
-        # Composite reward (weighted components)
-        reward = (
-            2.0 * position_reward +
-            0.2 * heading_reward +
-            1.0 * speed_reward +
-            1.0 * distance_reduction -  # Reward for moving closer
-            rudder_penalty
-        )
-        
-        boundary_size = 60
+        boundary_size = 200
         # Check if ship is out of bounds
         out_of_bounds = (
             x < -boundary_size or 
@@ -275,21 +284,30 @@ class ShipClarke83Env(gym.Env):
             y < -boundary_size or 
             y > boundary_size
         )
-        
-        # Success conditions (tighter)
-        success = (
-            current_pos_error < 5 and            # 5m position tolerance
-            psi_error < np.deg2rad(10) and       # 10° heading tolerance
-            speed_error < 0.5                    # 0.5m/s speed tolerance
-        )
-        
-        # Terminate if out of bounds or success condition met
-        terminated = out_of_bounds or success
-        
-        # Terminal rewards
-        if success:
-            reward += 100  # Success bonus
-        elif out_of_bounds:
+        reward = 0
+        target_reached = False
+        # Check if current target reached
+        if current_pos_error < 1:  # 1m position tolerance
+            target_reached = True
+            # Move to next target if available
+            if self.current_target_index < len(self.targets) - 1:
+                self.current_target_index += 1
+                # Update prev_pos_error for new target
+                next_target = self.targets[self.current_target_index]
+                next_x, next_y = next_target[0], next_target[1]
+                self.prev_pos_error = np.sqrt((x - next_x)**2 + (y - next_y)**2)
+            else:
+                # Last target reached
+                terminated = True
+            reward += 100  # Target reached bonus
+
+        # Set prev_pos_error for next step if not moving to new target
+        if not target_reached:
+            self.prev_pos_error = current_pos_error
+
+        # Terminal conditions
+        if out_of_bounds:
+            terminated = True
             reward -= 100  # Failure penalty
             
         return reward, bool(terminated)
@@ -297,11 +315,13 @@ class ShipClarke83Env(gym.Env):
     def render(self):
         """Render the environment using ShipRenderer"""
         if self.render_mode == "human" and self.renderer is not None:
+            # Get current target for rendering
+            current_target = self.targets[self.current_target_index]
             self.renderer.render(
                 eta=self.eta,
                 nu=self.ship.nu,
                 trail=self.trail,
-                target=self.target,
+                target=current_target,
                 step_count=self.step_count,
                 max_steps=self.max_steps,
                 current_action=self.current_action,
