@@ -1,5 +1,6 @@
 import pygame
 import numpy as np
+import math
 
 class ShipRenderer:
     def __init__(self, screen_width, screen_height, scale,
@@ -64,22 +65,34 @@ class ShipRenderer:
             target_y = center_y - target[1] * self.scale
             
             # Highlight current target
-            if np.array_equal(target, current_target):
+            if np.array_equal(target[:2], current_target):
                 color = (255, 0, 0)  # red for current target
                 radius = 12
                 # Draw target number
                 target_text = self.small_font.render(f"T{i+1}", True, (255, 255, 255))
-                self.screen.blit(target_text, (target_x - 8, target_y - 8))
+                self.screen.blit(target_text, (target_x - 8, target_y - 25))  # moved up
             else:
                 color = (200, 200, 200)  # gray for other targets
                 radius = 8
+                # Draw target number
+                target_text = self.small_font.render(f"T{i+1}", True, (0, 0, 0))
+                self.screen.blit(target_text, (target_x - 8, target_y - 25))  # moved up
             
             pygame.draw.circle(self.screen, color, (int(target_x), int(target_y)), radius)
             
-            # Draw target number for all targets
-            if not np.array_equal(target, current_target):
-                target_text = self.small_font.render(f"T{i+1}", True, (0, 0, 0))
-                self.screen.blit(target_text, (target_x - 8, target_y - 8))
+            # Draw heading indicator for target if available
+            if len(target) >= 3:
+                heading = target[2]
+                heading_length = 20
+                end_x = target_x + heading_length * math.cos(heading)
+                end_y = target_y - heading_length * math.sin(heading)
+                pygame.draw.line(
+                    self.screen,
+                    (0, 0, 0),
+                    (target_x, target_y),
+                    (end_x, end_y),
+                    2
+                )
 
         # Draw ship
         ship_x = center_x + eta[0] * self.scale
@@ -166,7 +179,7 @@ class ShipRenderer:
         status = "Status: RUNNING"
         if step_count >= max_steps:
             status = "Status: TIMEOUT"
-        elif np.array_equal(targets[-1], current_target):
+        elif np.array_equal(targets[-1][:2], current_target):
             status = "Status: SUCCESS"
         
         position = f"Position: ({eta[0]:.1f}, {eta[1]:.1f}) m"
@@ -175,8 +188,15 @@ class ShipRenderer:
         steps = f"Step: {step_count}/{max_steps}"
         
         # Find current target index
-        current_idx = np.where((targets == current_target).all(axis=1))[0][0] + 1
+        current_idx = np.where([np.array_equal(t[:2], current_target) for t in targets])[0][0] + 1
         targets_info = f"Target: {current_idx}/{len(targets)}"
+        
+        # Get current target heading
+        if current_idx <= len(targets):
+            target_heading = np.rad2deg(targets[current_idx-1][2])
+            target_heading_info = f"Target Heading: {target_heading:.1f}°"
+        else:
+            target_heading_info = "Target Heading: N/A"
 
         thrust_info = f"Surge Force: {current_thrust:.1f} N"
         rudder_info = f"Rudder Angle: {np.rad2deg(current_rudder):.1f}°"
@@ -188,11 +208,12 @@ class ShipRenderer:
             self.font.render(speed, True, self.text_color),
             self.font.render(steps, True, self.text_color),
             self.font.render(targets_info, True, self.text_color),
+            self.font.render(target_heading_info, True, self.text_color),
             self.font.render(thrust_info, True, self.text_color),
             self.font.render(rudder_info, True, self.text_color)
         ]
 
-        pygame.draw.rect(self.screen, (240, 240, 240), (10, 10, 400, 200))
+        pygame.draw.rect(self.screen, (240, 240, 240), (10, 10, 400, 230))
         for i, text in enumerate(texts):
             self.screen.blit(text, (20, 20 + i * 24))
 

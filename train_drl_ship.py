@@ -54,7 +54,7 @@ def train_agent(render_during_training=False):
     
     # Train the agent
     model.learn(
-        total_timesteps=500000, 
+        total_timesteps=1000000, 
         progress_bar=True,
         callback=callbacks if callbacks else None
     )
@@ -95,7 +95,7 @@ def evaluate_agent():
 
 if __name__ == "__main__":
     # Set to True to see occasional rendering during training
-    train_agent(render_during_training=True)
+    #train_agent(render_during_training=True)
     
     # Evaluate after training
     evaluate_agent()
