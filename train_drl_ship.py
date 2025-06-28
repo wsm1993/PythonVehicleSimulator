@@ -66,7 +66,12 @@ def train_agent(render_during_training=False):
     # Close environment
     env.close()
 
-def evaluate_agent():
+def evaluate_agent(render_speed=0.1):
+    """Evaluate the agent with adjustable rendering speed.
+    
+    Args:
+        render_speed: Time in seconds to wait between steps (controls speed)
+    """
     # Create environment with rendering for evaluation
     env = ShipEnv()
     
@@ -83,6 +88,9 @@ def evaluate_agent():
             obs, reward, done, truncated, info = env.step(action)
             env.render()
             
+            # Add delay to control rendering speed
+            pygame.time.wait(int(render_speed * 1000))  # Convert to milliseconds
+            
             # Check if window closed
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -95,7 +103,9 @@ def evaluate_agent():
 
 if __name__ == "__main__":
     # Set to True to see occasional rendering during training
-    #train_agent(render_during_training=True)
+    # train_agent(render_during_training=True)
     
-    # Evaluate after training
-    evaluate_agent()
+    # Evaluate after training - adjust render_speed as needed:
+    # Lower value = faster animation (0 = max speed)
+    # Higher value = slower animation
+    evaluate_agent(render_speed=0.1)  # Default 0.1 seconds between steps
