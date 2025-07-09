@@ -9,6 +9,7 @@ from matplotlib.patches import Polygon, Arrow, Rectangle
 from matplotlib.transforms import Affine2D
 from python_vehicle_simulator.vehicles.shipClarke83 import shipClarke83  # Using the provided model
 from mpc_planner import MPCPlanner
+from pid_controller import PIDController
 
 class ShipSimulator:
     def __init__(self, root):
@@ -50,6 +51,23 @@ class ShipSimulator:
         # Control settings
         self.rudder_angle = 0.0  # degrees
         self.surge_force = 100000  # Newtons
+
+        # PID Controllers
+        self.surge_pid = PIDController(
+            kp=5000,       # Proportional gain
+            ki=1,        # Integral gain
+            kd=0,      # Derivative gain
+            min_output=-200000,  # Min surge force (N)
+            max_output=200000    # Max surge force (N)
+        )
+
+        self.rudder_pid = PIDController(
+            kp=10,          # Proportional gain
+            ki=0.1,         # Integral gain
+            kd=0.1,           # Derivative gain
+            min_output=-90,  # Min rudder angle (deg)
+            max_output=90    # Max rudder angle (deg)
+        )
 
         # MPC controller
         self.mpc_planner = MPCPlanner(dt=0.2, horizon=30)
@@ -291,13 +309,16 @@ class ShipSimulator:
                 v_command, psi_dot_command = self.mpc_planner.update(
                     position, heading_deg)
                 
-                # Convert to ship controls
-                # (Simple proportional controllers - can be improved)
+                # Compute surge force using PID controller
                 surge_error = v_command - self.nu[0]
-                self.surge_force = 100000 * max(0, min(1, surge_error))
-                
-                # Convert turn rate to rudder angle
-                self.rudder_angle = psi_dot_command * 2.0  # scaling factor
+                self.surge_force = self.surge_pid.update(
+                surge_error, self.mpc_update_interval)
+
+                # Compute rudder angle using PID controller
+                current_yaw_rate = self.nu[5]  # Current yaw rate [rad/s]
+                yaw_rate_error = psi_dot_command - current_yaw_rate
+                self.rudder_angle = self.rudder_pid.update(
+                yaw_rate_error, self.mpc_update_interval)
                 
                 # Update sliders
                 self.rudder_slider.set(self.rudder_angle)
